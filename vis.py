@@ -1,7 +1,7 @@
-import vtkmodules.vtkFiltersSources
-import vtkmodules.vtkRenderingOpenGL2
-import vtkmodules.vtkRenderingCore
-import vtkmodules.vtkCommonColor
+import vtk
+from vtk.util.numpy_support import numpy_to_vtk
+
+
 import colorsys
 import numpy as np
 import cv2
@@ -123,18 +123,99 @@ for point in keypoints:
     x = ((((u/IMAGE_WIDTH) - 0.5) * z) + 0.5)
     y = ((((u/IMAGE_HEIGHT) - 0.5) * z) + 0.5)
     image = np.copy(im[xmin:xmax, ymin:ymax])
-    for x, row in enumerate(image):
-        for y, pixel in enumerate(row):
+    for a, row in enumerate(image):
+        for b, pixel in enumerate(row):
             pixelhue = colorsys.rgb_to_hsv(pixel[0], pixel[1], pixel[2])[0]
             if hue - pixelhue > HUEFACTOR or ((hue+0.5) % 1) - ((pixelhue + 0.5) % 1) > HUEFACTOR:
-                image[x, y] = np.array([0, 0, 0])
+                image[a, b] = np.array([0, 0, 0])
     galaxies.append((x, y, z, image))
 
 
 # VISUALISATION:
 
-colors = vtkmodules.vtkCommonColor.vtkNamedColors()
-bkg = map(lambda x: x / 255.0, [26, 51, 102, 255])
-colors.SetColor("BkgColor", *bkg)
-plane = vtkmodules.vtkFiltersSources.vtkPlaneSource()
-plane.
+# Setup render window, renderer, and interactor
+renderer = vtk.vtkRenderer()
+renderWindow = vtk.vtkRenderWindow()
+renderWindow.SetWindowName('Quad')
+renderWindow.AddRenderer(renderer)
+renderWindowInteractor = vtk.vtkRenderWindowInteractor()
+renderWindowInteractor.SetRenderWindow(renderWindow)
+
+
+colors = vtk.vtkNamedColors()
+
+scale = 1
+
+obj = []
+for galaxy in galaxies[:5]:
+
+    image = galaxy[3]
+    size = image.shape[0], image.shape[1]
+    offset = size[0]/2, size[1]/2
+
+    grid = vtk.vtkImageData()
+    grid.SetDimensions(image.shape[1], image.shape[0], 1)
+    vtkarr = numpy_to_vtk(np.flip(image.swapaxes(
+        0, 1), axis=1).reshape((-1, 3), order='F'))
+    vtkarr.SetName('Image')
+
+    grid.GetPointData().AddArray(vtkarr)
+    grid.GetPointData().SetActiveScalars('Image')
+
+    atext = vtk.vtkTexture()
+    atext.SetInputDataObject(grid)
+    atext.InterpolateOn()
+    atext.Update()
+
+    p0 = [galaxy[0] - offset[0], galaxy[1] - offset[1], galaxy[2]*scale]
+    p1 = [galaxy[0] - offset[0], galaxy[1] + offset[1], galaxy[2]*scale]
+    p2 = [galaxy[0] + offset[0], galaxy[1] + offset[1], galaxy[2]*scale]
+    p3 = [galaxy[0] + offset[0], galaxy[1] - offset[1], galaxy[2]*scale]
+
+    points = vtk.vtkPoints()
+    points.InsertNextPoint(p0)
+    points.InsertNextPoint(p1)
+    points.InsertNextPoint(p2)
+    points.InsertNextPoint(p3)
+
+    # Create a quad on the four points
+    quad = vtk.vtkQuad()
+    quad.GetPointIds().SetId(0, 0)
+    quad.GetPointIds().SetId(1, 1)
+    quad.GetPointIds().SetId(2, 2)
+    quad.GetPointIds().SetId(3, 3)
+
+    # Create a cell array to store the quad in
+    quads = vtk.vtkCellArray()
+    quads.InsertNextCell(quad)
+
+    # Create a polydata to store everything in
+    polydata = vtk.vtkPolyData()
+
+    # Add the points and quads to the dataset
+    polydata.SetPoints(points)
+    polydata.SetPolys(quads)
+
+    textureCoordinates = vtk.vtkFloatArray()
+    textureCoordinates.SetNumberOfComponents(2)
+    textureCoordinates.SetName("TextureCoordinates")
+    textureCoordinates.InsertNextTuple((0.0, 0.0))
+    textureCoordinates.InsertNextTuple((1.0, 0.0))
+    textureCoordinates.InsertNextTuple((1.0, 1.0))
+    textureCoordinates.InsertNextTuple((0.0, 1.0))
+    polydata.GetPointData().SetTCoords(textureCoordinates)
+
+    # Setup actor and mapper
+    mapper = vtk.vtkPolyDataMapper()
+    mapper.SetInputData(polydata)
+
+    actor = vtk.vtkActor()
+    actor.SetMapper(mapper)
+    # actor.GetProperty().SetColor(colors.GetColor3d('White'))
+    actor.SetTexture(atext)
+
+    renderer.AddActor(actor)
+
+renderer.SetBackground(colors.GetColor3d('Black'))
+renderWindow.Render()
+renderWindowInteractor.Start()
