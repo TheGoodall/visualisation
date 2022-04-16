@@ -8,6 +8,7 @@ import cv2
 from PIL import Image, ImageDraw, ImageColor
 from random import random, randint
 import math
+import operator
 
 # GENERATING IMAGE
 IMAGE_WIDTH = 4096
@@ -17,10 +18,9 @@ IMAGE_HEIGHT = 2160
 def get_coords(galaxy):
     x = galaxy[0]
     y = galaxy[1]
-    z = galaxy[2]
 
-    u = (((x-0.5)/z)+0.5)*IMAGE_WIDTH
-    v = (((y-0.5)/z)+0.5)*IMAGE_HEIGHT
+    u = x*IMAGE_WIDTH
+    v = y*IMAGE_HEIGHT
     return u, v
 
 
@@ -30,8 +30,8 @@ def get_colour(galaxy):
 
 
 galaxies = []
-for i in range(3000):
-    galaxies.append([random(), random(), random()**2, randint(0, 360)])
+for i in range(100):
+    galaxies.append([random(), random(), random(), randint(0, 360)])
 galaxies.sort(key=lambda x: x[2], reverse=True)
 gal = Image.open("./galaxy.png")
 im = Image.new("RGB", (IMAGE_WIDTH, IMAGE_HEIGHT))
@@ -117,14 +117,14 @@ for point in keypoints:
 
     hue = sumnation/count
 
-    z = hue/(240/360)
+    z = (hue/240)*360
     z = 1 if z > 1 else z
-    z = ((1-z)*0.8) + 0.2
+    z = 0 if z < 0 else z
 
     u = coords[0]
     v = coords[1]
-    x = ((((u/IMAGE_WIDTH) - 0.5) * z) + 0.5)
-    y = ((((v/IMAGE_HEIGHT) - 0.5) * z) + 0.5)
+    x = u/IMAGE_WIDTH
+    y = v/IMAGE_HEIGHT
     # print(x)
     # print(y)
     # x = u/IMAGE_WIDTH
@@ -135,7 +135,7 @@ for point in keypoints:
             pixelhue = colorsys.rgb_to_hsv(pixel[0], pixel[1], pixel[2])[0]
             if hue - pixelhue > HUEFACTOR or ((hue+0.5) % 1) - ((pixelhue + 0.5) % 1) > HUEFACTOR:
                 image[a, b] = np.array([0, 0, 0])
-    galaxies.append((x, y, z, image))
+    galaxies.append([x, y, z, image, None])
 
 
 # VISUALISATION:
@@ -151,26 +151,65 @@ renderWindowInteractor.SetRenderWindow(renderWindow)
 
 colors = vtk.vtkNamedColors()
 
-scale = 1
+lines = []
+
+lineoffset = 500
+
+
+def callback(obj, _):
+    scale = obj.GetRepresentation().GetValue()
+    rescale(scale)
+
+
+def callback_button(obj, _):
+    global lineoffset
+    st = obj.GetRepresentation().GetState()
+    lineoffset = 500 if st == 1 else 0
+    reline()
+
+
+def offset_tuple(t, offset):
+    return tuple(map(operator.add, t, (offset,)*len(t)))
+
+
+def reline():
+    for line in lines:
+        line[3].SetPoint1(offset_tuple(
+            galaxies[line[0]][4].GetPosition(), lineoffset))
+        line[3].SetPoint2(offset_tuple(
+            galaxies[line[1]][4].GetPosition(), lineoffset))
+
+
+def rescale(scale):
+    for galaxy in galaxies:
+        galaxy[4].SetPosition(galaxy[0], galaxy[1]*0.6, -scale*galaxy[2])
+    reline()
+
 
 obj = []
-for galaxy in galaxies:
+for i, galaxy in enumerate(galaxies):
 
-    image = galaxy[3]
+    image = galaxy[3][..., ::-1]
     size = image.shape[0], image.shape[1]
     offset = size[0]/2, size[1]/2
 
-    grid = vtk.vtkImageData()
-    grid.SetDimensions(image.shape[1], image.shape[0], 1)
-    vtkarr = numpy_to_vtk(np.flip(image.swapaxes(
-        0, 1), axis=1).reshape((-1, 3), order='F'))
+    image_data = vtk.vtkImageData()
+    image_data.SetDimensions(image.shape[1], image.shape[0], 1)
+    image_data.SetNumberOfScalarComponents(
+        image.shape[2], image_data.GetInformation())
+    pd = image_data.GetPointData()
+    new_arr = image[::-1].reshape((-1, image.shape[2]))
+    pd.SetScalars(numpy_to_vtk(new_arr))
+    pd._numpy_reference = new_arr.data
+    # vtkarr = numpy_to_vtk(np.flip(image.swapaxes(
+    # 0, 1), axis=1).reshape((-1, 3), order='F'))
+    vtkarr = numpy_to_vtk(image.reshape((-1, 3), order='F'))
     vtkarr.SetName('Image')
-
-    grid.GetPointData().AddArray(vtkarr)
-    grid.GetPointData().SetActiveScalars('Image')
+    image_data.GetPointData().AddArray(vtkarr)
+    image_data.GetPointData().SetActiveScalars('Image')
 
     atext = vtk.vtkTexture()
-    atext.SetInputDataObject(grid)
+    atext.SetInputDataObject(image_data)
     atext.InterpolateOn()
     atext.Update()
 
@@ -221,13 +260,118 @@ for galaxy in galaxies:
     # actor.GetProperty().SetColor(colors.GetColor3d('White'))
     actor.SetTexture(atext)
 
-    actor.SetPosition(galaxy[0], galaxy[1], galaxy[2]*scale)
-    actor.SetScale(galaxy[2]*size[0]/IMAGE_WIDTH,
-                   galaxy[2]*size[1]/IMAGE_HEIGHT, 1)
-
+    actor.SetScale(size[0]/IMAGE_WIDTH,
+                   size[1]/IMAGE_HEIGHT, 1)
+    galaxies[i][4] = actor
     renderer.AddActor(actor)
 
-renderer.GetActiveCamera().SetFocalPoint((0.45, 0.7, 0.2))
+
+selected = [randint(0, len(galaxies))]
+
+
+def select_new_galaxy():
+    rand = randint(0, len(galaxies))
+    if rand in selected:
+        rand = select_new_galaxy()
+    selected.append(rand)
+    return rand
+
+
+sources = []
+
+mappers = []
+
+for i in range(6):
+    sources.append(vtk.vtkLineSource())
+    rand1 = randint(0, len(selected))
+    rand2 = select_new_galaxy()
+    mappers.append(vtk.vtkPolyDataMapper())
+    mappers[-1].SetInputConnection(sources[-1].GetOutputPort())
+    lines.append([rand2, selected[rand1], vtk.vtkActor(), sources[-1]])
+    lines[-1][2].SetMapper(mappers[-1])
+    renderer.AddActor(lines[-1][2])
+
+rescale(0)
+
+
+renderer.GetActiveCamera().SetFocalPoint((0.25, 0.5, -0.2))
+renderer.GetActiveCamera().SetPosition((0.25, 0.5, 1.5))
+renderer.GetActiveCamera().SetRoll(270)
 renderer.SetBackground(colors.GetColor3d('Black'))
+renderer.AutomaticLightCreationOff()
+light = renderer.MakeLight()
+light.SetDiffuseColor(0, 0, 0)
+light.SetSpecularColor(0, 0, 0)
+light.SetAmbientColor(255, 255, 255)
+
+sliderRep = vtk.vtkSliderRepresentation2D()
+sliderRep.SetTitleText("3Dify")
+sliderRep.GetTitleProperty().SetColor(0, 1, 0)
+sliderRep.GetTitleProperty().ShadowOff()
+sliderRep.GetSliderProperty().SetColor(0, 0, 1)
+sliderRep.GetTubeProperty().SetColor(1, 0, 0)
+sliderRep.GetCapProperty().SetColor(1, 1, .5)
+sliderRep.GetPoint1Coordinate().SetCoordinateSystemToNormalizedDisplay()
+sliderRep.GetPoint1Coordinate().SetValue(0.2, 0.1)
+sliderRep.GetPoint2Coordinate().SetCoordinateSystemToNormalizedDisplay()
+sliderRep.GetPoint2Coordinate().SetValue(0.8, 0.1)
+sliderRep.SetMinimumValue(0)
+sliderRep.SetMaximumValue(1)
+sliderRep.SetValue(0)
+sliderWidget = vtk.vtkSliderWidget()
+sliderWidget.SetInteractor(renderWindowInteractor)
+sliderWidget.SetRepresentation(sliderRep)
+sliderWidget.AddObserver("InteractionEvent", callback)
+sliderWidget.EnabledOn()
+
+
+def im(image):
+    image_data = vtk.vtkImageData()
+    image_data.SetDimensions(image.shape[1], image.shape[0], 1)
+    image_data.SetNumberOfScalarComponents(
+        image.shape[2], image_data.GetInformation())
+    pd = image_data.GetPointData()
+    new_arr = image[::-1].reshape((-1, image.shape[2]))
+    pd.SetScalars(numpy_to_vtk(new_arr))
+    pd._numpy_reference = new_arr.data
+    vtkarr = numpy_to_vtk(np.flip(image.swapaxes(
+        0, 1), axis=1).reshape((-1, 3), order='F'))
+    # vtkarr = numpy_to_vtk(image.reshape((-1, 3), order='F'))
+    vtkarr.SetName('Image')
+    image_data.GetPointData().AddArray(vtkarr)
+    image_data.GetPointData().SetActiveScalars('Image')
+
+    return image_data
+
+
+nocons = im(cv2.imread("noCons.png"))
+cons = im(cv2.imread("Cons.png"))
+buttonRep = vtk.vtkTexturedButtonRepresentation2D()
+buttonRep.SetNumberOfStates(2)
+buttonRep.SetState(1)
+buttonRep.SetButtonTexture(0, cons)
+buttonRep.SetButtonTexture(1, nocons)
+upperRight = vtk.vtkCoordinate()
+upperRight.SetCoordinateSystemToNormalizedDisplay()
+upperRight.SetValue(1.0, 1.0)
+bds = [0] * 6
+sz = 100
+bds[0] = upperRight.GetComputedDisplayValue(renderer)[0] - sz
+bds[1] = bds[0] + sz
+bds[2] = upperRight.GetComputedDisplayValue(renderer)[1] - sz
+bds[3] = bds[2] + sz
+bds[4] = bds[5] = 0.0
+
+buttonRep.SetPlaceFactor(1)
+buttonRep.PlaceWidget(bds)
+
+buttonWidget = vtk.vtkButtonWidget()
+buttonWidget.SetInteractor(renderWindowInteractor)
+buttonWidget.SetRepresentation(buttonRep)
+buttonWidget.AddObserver("StateChangedEvent", callback_button)
+buttonWidget.On()
+buttonWidget.EnabledOn()
+
+renderWindowInteractor.GetInteractorStyle().SetCurrentStyleToTrackballCamera()
 renderWindow.Render()
 renderWindowInteractor.Start()
