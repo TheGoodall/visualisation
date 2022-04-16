@@ -354,16 +354,16 @@ buttonRep.SetButtonTexture(1, nocons)
 upperRight = vtk.vtkCoordinate()
 upperRight.SetCoordinateSystemToNormalizedDisplay()
 upperRight.SetValue(1.0, 1.0)
-bds = [0] * 6
-sz = 100
-bds[0] = upperRight.GetComputedDisplayValue(renderer)[0] - sz
-bds[1] = bds[0] + sz
-bds[2] = upperRight.GetComputedDisplayValue(renderer)[1] - sz
-bds[3] = bds[2] + sz
-bds[4] = bds[5] = 0.0
+bounds = [0, 0, 0, 0, 0, 0]
+size = 100
+bounds[0] = upperRight.GetComputedDisplayValue(renderer)[0] - size
+bounds[1] = bounds[0] + size
+bounds[2] = upperRight.GetComputedDisplayValue(renderer)[1] - size
+bounds[3] = bounds[2] + size
+bounds[4] = bounds[5] = 0.0
 
 buttonRep.SetPlaceFactor(1)
-buttonRep.PlaceWidget(bds)
+buttonRep.PlaceWidget(bounds)
 
 buttonWidget = vtk.vtkButtonWidget()
 buttonWidget.SetInteractor(renderWindowInteractor)
