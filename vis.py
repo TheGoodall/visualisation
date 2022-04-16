@@ -117,11 +117,18 @@ for point in keypoints:
 
     hue = sumnation/count
 
-    z = (hue)/(240/360)
+    z = hue/(240/360)
+    z = 1 if z > 1 else z
+    z = ((1-z)*0.8) + 0.2
+
     u = coords[0]
     v = coords[1]
     x = ((((u/IMAGE_WIDTH) - 0.5) * z) + 0.5)
-    y = ((((u/IMAGE_HEIGHT) - 0.5) * z) + 0.5)
+    y = ((((v/IMAGE_HEIGHT) - 0.5) * z) + 0.5)
+    # print(x)
+    # print(y)
+    # x = u/IMAGE_WIDTH
+    # y = v/IMAGE_HEIGHT
     image = np.copy(im[xmin:xmax, ymin:ymax])
     for a, row in enumerate(image):
         for b, pixel in enumerate(row):
@@ -147,7 +154,7 @@ colors = vtk.vtkNamedColors()
 scale = 1
 
 obj = []
-for galaxy in galaxies[:5]:
+for galaxy in galaxies:
 
     image = galaxy[3]
     size = image.shape[0], image.shape[1]
@@ -167,10 +174,10 @@ for galaxy in galaxies[:5]:
     atext.InterpolateOn()
     atext.Update()
 
-    p0 = [galaxy[0] - offset[0], galaxy[1] - offset[1], galaxy[2]*scale]
-    p1 = [galaxy[0] - offset[0], galaxy[1] + offset[1], galaxy[2]*scale]
-    p2 = [galaxy[0] + offset[0], galaxy[1] + offset[1], galaxy[2]*scale]
-    p3 = [galaxy[0] + offset[0], galaxy[1] - offset[1], galaxy[2]*scale]
+    p0 = [0, 0, 0]
+    p1 = [1, 0, 0]
+    p2 = [1, 1, 0]
+    p3 = [0, 1, 0]
 
     points = vtk.vtkPoints()
     points.InsertNextPoint(p0)
@@ -214,8 +221,13 @@ for galaxy in galaxies[:5]:
     # actor.GetProperty().SetColor(colors.GetColor3d('White'))
     actor.SetTexture(atext)
 
+    actor.SetPosition(galaxy[0], galaxy[1], galaxy[2]*scale)
+    actor.SetScale(galaxy[2]*size[0]/IMAGE_WIDTH,
+                   galaxy[2]*size[1]/IMAGE_HEIGHT, 1)
+
     renderer.AddActor(actor)
 
+renderer.GetActiveCamera().SetFocalPoint((0.45, 0.7, 0.2))
 renderer.SetBackground(colors.GetColor3d('Black'))
 renderWindow.Render()
 renderWindowInteractor.Start()
